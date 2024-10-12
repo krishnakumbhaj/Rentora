@@ -70,6 +70,7 @@ Rentora is a decentralized marketplace designed to connect users within local co
 
 - **Presentation**: [Rentora PPT](https://fetch-a-thon.my.canva.site/rentora)
 - **GitHub Repository**: [Rentora Repo](https://github.com/krishnakumbhaj/Rentora)
+
 [![Rentora Demo Video](https://img.youtube.com/vi/BOYW9prw0eY/0.jpg)](https://youtu.be/BOYW9prw0eY)
 
 ## **Business Model**
