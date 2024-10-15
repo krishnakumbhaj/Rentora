@@ -8,8 +8,40 @@ from string import ascii_letters, digits
 from functools import wraps
 from uagents import Agent, Context, Bureau, Protocol  # type: ignore
 from uagents.setup import fund_agent_if_low  # type: ignore
+from uagents.envelope import Envelope  # type: ignore
+from uagents.query import query  # type: ignore
+import asyncio
+import base64
+from io import BytesIO
+from PIL import Image, ImageTk
+import json
 
 load_dotenv()
+
+
+def encode_image(image: bytes) -> str:
+    return base64.b64encode(image).decode('utf-8')
+
+
+def decode_image(image: str) -> Any:
+    img_bytes = base64.b64decode(image)
+    image_file = Image.open(BytesIO(img_bytes))
+    image_file.resize((150, 150))
+    photo = ImageTk.PhotoImage(image_file)
+    return photo
+
+
+def sync_query(destination: str, message: Any) -> Any:
+    async def await_query(address: str, message: Any) -> Any:
+        return await query(destination=address, message=message, timeout=240.0)
+    loop = asyncio.new_event_loop()
+    old_loop = asyncio.get_event_loop()
+    asyncio.set_event_loop(loop)
+    data = asyncio.run(await_query(destination, message))
+    asyncio.set_event_loop(old_loop)
+    if not isinstance(data, Envelope):
+        return None
+    return json.loads(data.decode_payload())
 
 
 def ensure_files(func):
@@ -32,7 +64,8 @@ def ensure_files(func):
                         "start_port": 8000,
                         "active_ports": []
                     },
-                    "agents": {}
+                    "agents": {},
+                    "items": ["wearable", "transport", "electronic", "furniture"]
                 }, file, indent=4)
                 file.truncate()
 
@@ -49,7 +82,8 @@ def ensure_files(func):
                         "start_port": 8000,
                         "active_ports": []
                     },
-                    "agents": {}
+                    "agents": {},
+                    "items": ["wearable", "transport", "electronic", "furniture"]
                 }, file, indent=4)
                 file.truncate()
 
@@ -71,6 +105,13 @@ def get_port(file_path: str) -> int:
     return port
 
 
+@ensure_files
+def get_items(file_path: str) -> List[str]:
+    with open(file_path, 'r') as file:
+        data = load(file)
+        return data["items"]
+
+
 class AgentData(BaseModel):
     name: str
     secret: str = Field(default_factory=lambda: "".join(
@@ -90,9 +131,9 @@ def create_agent(
     custom_startup_function: Optional[Callable] = None,
     custom_shutdown_function: Optional[Callable] = None
 ) -> Agent:
-    
+
     print("Initializing Agent...")
-    
+
     print("Creating AgentData...")
     agent_data = AgentData(name=name)
     print("AgentData created.")
@@ -122,74 +163,80 @@ def create_agent(
 
     def startup_wrapper(custom_startup_function: Optional[Callable]) -> Callable:
         if not custom_startup_function:
-            async def register(ctx: Context) -> None:
-                ctx.logger.info(f"Agent {name} started.")
-                ctx.logger.info(f"Agent address: {agent_data.agent_address}")
-                
-                ctx.logger.info("Running default startup function...")
+            async def register(context: Context) -> None:
+                context.logger.info(f"Agent {name} started.")
+                context.logger.info(
+                    f"Agent address: {agent_data.agent_address}")
 
-                ctx.logger.info("Setting storage initials...")
+                context.logger.info("Running default startup function...")
+
+                context.logger.info("Setting storage initials...")
                 if storage_initials:
                     for key, value in storage_initials.items():
-                        ctx.logger.info(f"Setting {key} to {value}")
-                        ctx.storage.set(key, value)
-                ctx.logger.info("Storage initials set.")
+                        if context.storage.has(key):
+                            context.logger.info(
+                                f"Key {key} already exists. Skipping...")
+                        else:
+                            context.logger.info(f"Setting {key} to {value}")
+                            context.storage.set(key, value)
+                context.logger.info("Storage initials set.")
 
-                ctx.logger.info("Default startup function completed.")
+                context.logger.info("Default startup function completed.")
 
             return register
         else:
             @wraps(custom_startup_function)
-            async def wrapped_startup(ctx: Context) -> None:
-                ctx.logger.info(f"Agent {name} started.")
-                ctx.logger.info(f"Agent address: {agent_data.agent_address}")
+            async def wrapped_startup(context: Context) -> None:
+                context.logger.info(f"Agent {name} started.")
+                context.logger.info(
+                    f"Agent address: {agent_data.agent_address}")
 
-                ctx.logger.info("Running custom startup function...")
+                context.logger.info("Running custom startup function...")
 
-                ctx.logger.info("Setting storage initials...")
+                context.logger.info("Setting storage initials...")
                 if storage_initials:
                     for key, value in storage_initials.items():
-                        ctx.logger.info(f"Setting {key} to {value}")
-                        ctx.storage.set(key, value)
-                ctx.logger.info("Storage initials set.")
+                        context.logger.info(f"Setting {key} to {value}")
+                        context.storage.set(key, value)
+                context.logger.info("Storage initials set.")
 
-                ctx.logger.info("Executing custom startup function...")
-                await custom_startup_function(ctx)
-                ctx.logger.info("Execution completed.")
+                context.logger.info("Executing custom startup function...")
+                await custom_startup_function(context)
+                context.logger.info("Execution completed.")
 
-                ctx.logger.info("Custom startup function completed.")
+                context.logger.info("Custom startup function completed.")
 
             return wrapped_startup
 
     def shutdown_wrapper(custom_shutdown_function: Optional[Callable]) -> Callable:
         if not custom_shutdown_function:
-            async def unregister(ctx: Context) -> None:
-                ctx.logger.info("Running default shutdown function...")
+            async def unregister(context: Context) -> None:
+                context.logger.info("Running default shutdown function...")
 
-                ctx.logger.info("Removing agent from active ports...")
+                context.logger.info("Removing agent from active ports...")
                 remove_agent(name)
-                ctx.logger.info("Agent removed from active ports.")
+                context.logger.info("Agent removed from active ports.")
 
-                ctx.logger.info("Default shutdown function completed.")
+                context.logger.info("Default shutdown function completed.")
             return unregister
         else:
             @wraps(custom_shutdown_function)
-            async def wrapped_shutdown(ctx: Context) -> None:
-                ctx.logger.info("Running custom shutdown function...")
+            async def wrapped_shutdown(context: Context) -> None:
+                context.logger.info("Running custom shutdown function...")
 
-                ctx.logger.info("Executing custom shutdown function...")
-                await custom_shutdown_function(ctx)
-                ctx.logger.info("Execution completed.")
+                context.logger.info("Executing custom shutdown function...")
+                await custom_shutdown_function(context)
+                context.logger.info("Execution completed.")
 
-                ctx.logger.info("Removing agent from active ports...")
+                context.logger.info("Removing agent from active ports...")
                 remove_agent(name)
-                ctx.logger.info("Agent removed from active ports.")
+                context.logger.info("Agent removed from active ports.")
 
-                ctx.logger.info("Custom shutdown function completed.")
+                context.logger.info("Custom shutdown function completed.")
             return wrapped_shutdown
 
     print("Setting startup and shutdown functions...")
-    agent.on_event("startup")(startup_wrapper(custom_startup_function))    
+    agent.on_event("startup")(startup_wrapper(custom_startup_function))
     agent.on_event("shutdown")(shutdown_wrapper(custom_shutdown_function))
     print("Startup and shutdown functions set.")
 
@@ -201,7 +248,7 @@ def create_agent(
         print("Protocols included.")
     else:
         print("No protocols to include.")
-        
+
     print("Agent initialization completed.")
 
     print("Saving AgentData...")
